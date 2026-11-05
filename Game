@@ -1,0 +1,244 @@
+import pyray as rl
+
+# BLINK ESCAPE
+# Original 2D platform game made with Python + raylib.
+# Controls: A/D or LEFT/RIGHT = move, SPACE/W/UP = jump.
+
+WIDTH, HEIGHT = 1000, 650
+PLAYER_W, PLAYER_H = 30, 40
+MOVE_SPEED = 310
+JUMP_SPEED = -600
+GRAVITY = 1450
+
+BG = rl.Color(12, 16, 35, 255)
+WHITE = rl.Color(245, 248, 255, 255)
+CYAN = rl.Color(60, 235, 255, 255)
+PURPLE = rl.Color(166, 91, 255, 255)
+YELLOW = rl.Color(255, 215, 90, 255)
+RED = rl.Color(255, 76, 105, 255)
+PLATFORM = rl.Color(43, 54, 88, 255)
+GREEN = rl.Color(90, 255, 174, 255)
+
+# Each level is built from rectangles: platforms, hazards, and a portal.
+LEVELS = [
+    {
+        "title": "LEVEL 1 - FIRST STEPS",
+        "platforms": [(0, 585, 230, 65), (310, 535, 150, 25),
+                      (520, 475, 150, 25), (735, 525, 265, 125)],
+        "hazards": [(175, 561, 35, 24), (365, 511, 35, 24),
+                    (570, 451, 35, 24)],
+        "portal": (900, 455, 45, 70),
+    },
+    {
+        "title": "LEVEL 2 - NEON RUN",
+        "platforms": [(0, 585, 140, 65), (200, 525, 120, 25),
+                      (375, 455, 115, 25), (550, 510, 115, 25),
+                      (720, 430, 115, 25), (900, 525, 100, 125)],
+        "hazards": [(85, 561, 32, 24), (240, 501, 32, 24),
+                    (410, 431, 32, 24), (585, 486, 32, 24),
+                    (755, 406, 32, 24)],
+        "portal": (925, 455, 42, 68),
+    },
+    {
+        "title": "LEVEL 3 - FINAL ESCAPE",
+        "platforms": [(0, 585, 115, 65), (165, 510, 95, 25),
+                      (305, 435, 95, 25), (445, 500, 95, 25),
+                      (590, 420, 95, 25), (735, 485, 95, 25),
+                      (895, 525, 105, 125)],
+        "hazards": [(82, 561, 25, 24), (195, 486, 30, 24),
+                    (330, 411, 30, 24), (470, 476, 30, 24),
+                    (615, 396, 30, 24), (760, 461, 30, 24)],
+        "portal": (925, 455, 42, 68),
+    },
+]
+
+rl.init_window(WIDTH, HEIGHT, "Blink Escape")
+rl.set_target_fps(60)
+
+state = "lobby"  # lobby, playing, victory
+level_number = 0
+player = rl.Rectangle(35, 545, PLAYER_W, PLAYER_H)
+vel_y = 0.0
+grounded = False
+
+
+def reset_player():
+    global player, vel_y, grounded
+    player = rl.Rectangle(35, 545, PLAYER_W, PLAYER_H)
+    vel_y = 0.0
+    grounded = False
+
+
+def begin_game():
+    global state, level_number
+    level_number = 0
+    reset_player()
+    state = "playing"
+
+
+def draw_background():
+    rl.clear_background(BG)
+    # Decorative stars drawn with basic raylib shapes.
+    for x, y in [(65, 85), (190, 165), (355, 75), (515, 130),
+                 (710, 82), (910, 145), (830, 285), (115, 310)]:
+        rl.draw_circle(x, y, 2, CYAN)
+    rl.draw_line(0, 620, WIDTH, 620, rl.Color(33, 44, 74, 255))
+
+
+def draw_button(rect, label):
+    mouse = rl.get_mouse_position()
+    hover = rl.check_collision_point_rec(mouse, rect)
+    rl.draw_rectangle_rec(rect, PURPLE if hover else PLATFORM)
+    rl.draw_rectangle_lines_ex(rect, 2, CYAN)
+    tw = rl.measure_text(label, 26)
+    rl.draw_text(label, int(rect.x + (rect.width - tw) / 2),
+                 int(rect.y + 15), 26, WHITE)
+    return hover and rl.is_mouse_button_pressed(rl.MOUSE_BUTTON_LEFT)
+
+
+def draw_portal(rect):
+    cx = int(rect.x + rect.width / 2)
+    cy = int(rect.y + rect.height / 2)
+    rl.draw_circle_lines(cx, cy, 36, PURPLE)
+    rl.draw_circle_lines(cx, cy, 27, CYAN)
+    rl.draw_circle_lines(cx, cy, 18, PURPLE)
+    rl.draw_rectangle_rec(rect, rl.Color(80, 60, 200, 80))
+
+
+def update_game(dt):
+    global player, vel_y, grounded, level_number, state
+
+    level = LEVELS[level_number]
+    platforms = [rl.Rectangle(*p) for p in level["platforms"]]
+    hazards = [rl.Rectangle(*h) for h in level["hazards"]]
+    portal = rl.Rectangle(*level["portal"])
+
+    # Horizontal movement and side collisions.
+    dx = 0
+    if rl.is_key_down(rl.KEY_RIGHT) or rl.is_key_down(rl.KEY_D):
+        dx += MOVE_SPEED * dt
+    if rl.is_key_down(rl.KEY_LEFT) or rl.is_key_down(rl.KEY_A):
+        dx -= MOVE_SPEED * dt
+    player.x += dx
+    for p in platforms:
+        if rl.check_collision_recs(player, p):
+            if dx > 0:
+                player.x = p.x - player.width
+            elif dx < 0:
+                player.x = p.x + p.width
+
+    # Jumping is only allowed while grounded.
+    if grounded and (rl.is_key_pressed(rl.KEY_SPACE)
+                      or rl.is_key_pressed(rl.KEY_W)
+                      or rl.is_key_pressed(rl.KEY_UP)):
+        vel_y = JUMP_SPEED
+        grounded = False
+
+    # Gravity and vertical landing checks.
+    old_bottom = player.y + player.height
+    vel_y += GRAVITY * dt
+    player.y += vel_y * dt
+    grounded = False
+    for p in platforms:
+        if rl.check_collision_recs(player, p):
+            if vel_y >= 0 and old_bottom <= p.y + 10:
+                player.y = p.y - player.height
+                vel_y = 0
+                grounded = True
+            elif vel_y < 0:
+                player.y = p.y + p.height
+                vel_y = 0
+
+    # Hazard hit or falling off-screen restarts the current level.
+    hit_hazard = any(rl.check_collision_recs(player, h) for h in hazards)
+    if hit_hazard or player.y > HEIGHT + 60:
+        reset_player()
+        return
+
+    # Portal takes the player to the next level or the victory screen.
+    if rl.check_collision_recs(player, portal):
+        if level_number < len(LEVELS) - 1:
+            level_number += 1 
+            reset_player()
+        else:
+            state = "victory"
+
+
+def draw_level():
+    level = LEVELS[level_number]
+    draw_background()
+
+    for data in level["platforms"]:
+        p = rl.Rectangle(*data)
+        rl.draw_rectangle_rec(p, PLATFORM)
+        rl.draw_rectangle(int(p.x), int(p.y), int(p.width), 5, CYAN)
+
+    for data in level["hazards"]:
+        h = rl.Rectangle(*data)
+        rl.draw_rectangle_rec(h, RED)
+        # Little warning triangles make hazards easier to identify.
+        rl.draw_triangle(
+            rl.Vector2(h.x, h.y + h.height),
+            rl.Vector2(h.x + h.width / 2, h.y),
+            rl.Vector2(h.x + h.width, h.y + h.height),
+            RED
+        )
+
+    draw_portal(rl.Rectangle(*level["portal"]))
+
+    # Player body and simple face.
+    rl.draw_rectangle_rec(player, YELLOW)
+    rl.draw_circle(int(player.x + 9), int(player.y + 12), 2, BG)
+    rl.draw_circle(int(player.x + 21), int(player.y + 12), 2, BG)
+
+    rl.draw_text(level["title"], 24, 20, 24, WHITE)
+    rl.draw_text("MOVE: A/D or arrows     JUMP: SPACE / W / UP",
+                 24, 52, 17, CYAN)
+    rl.draw_text("Avoid red hazards and reach the glowing portal.",
+                 24, 76, 16, WHITE)
+
+
+while not rl.window_should_close():
+    dt = min(rl.get_frame_time(), 0.033)
+
+    if state == "lobby":
+        draw_background()
+        title = "BLINK ESCAPE"
+        tw = rl.measure_text(title, 60)
+        rl.draw_text(title, (WIDTH - tw) // 2, 145, 60, CYAN)
+        subtitle = "A THREE-LEVEL PARKOUR CHALLENGE"
+        sw = rl.measure_text(subtitle, 23)
+        rl.draw_text(subtitle, (WIDTH - sw) // 2, 225, 23, WHITE)
+        rl.draw_text("Jump between platforms. Dodge hazards. Find the portal.",
+                     190, 290, 19, WHITE)
+        rl.draw_text("Can you escape all three levels?", 330, 325, 19, PURPLE)
+        if draw_button(rl.Rectangle(375, 390, 250, 62), "PLAY"):
+            begin_game()
+        rl.draw_text("Press ENTER to start", 390, 490, 19, CYAN)
+        rl.draw_text("A/D or arrow keys to move  |  SPACE to jump",
+                     265, 530, 18, WHITE)
+        if rl.is_key_pressed(rl.KEY_ENTER):
+            begin_game()
+
+    elif state == "playing":
+        update_game(dt)
+        draw_level()
+
+    else:
+        draw_background()
+        title = "YOU ESCAPED!"
+        tw = rl.measure_text(title, 56)
+        rl.draw_text(title, (WIDTH - tw) // 2, 175, 56, GREEN)
+        message = "You completed all three parkour levels."
+        mw = rl.measure_text(message, 23)
+        rl.draw_text(message, (WIDTH - mw) // 2, 255, 23, WHITE)
+        if draw_button(rl.Rectangle(375, 345, 250, 62), "PLAY AGAIN"):
+            begin_game()
+        rl.draw_text("Press ENTER to play again", 365, 455, 18, CYAN)
+        if rl.is_key_pressed(rl.KEY_ENTER):
+            begin_game()
+
+    rl.end_drawing()
+
+rl.close_window()
+
